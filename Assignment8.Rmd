@@ -1,0 +1,132 @@
+---
+title: "Assignment 8"
+author: "Ira"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Overview
+
+6 participants were asked to perform barbell lifts correctly and incorrectly in 
+5 different ways using devices such as Jawbone Up, Nike FuelBand, and Fitbit.
+In our access there are training and test datasets.The goal of the project is to predict the manner in which participants did the exercise. This is the "classe" variable in the training set(character variable which can take values - "A","B","C","D","E").
+
+## Loading and preprocessing data
+
+1.  Load data and all necessary libraries:
+
+```{r, echo=TRUE}
+library(readr, warn.conflicts = FALSE)
+library(dplyr, warn.conflicts = FALSE)
+library(ggplot2, warn.conflicts = FALSE)
+library(lattice, warn.conflicts = FALSE)
+library(caret, warn.conflicts = FALSE)
+library(randomForest, warn.conflicts = FALSE)
+library(gbm, warn.conflicts = FALSE)
+library(parallel, warn.conflicts = FALSE)
+library(doParallel, warn.conflicts = FALSE)
+
+setwd("D:/GIT/datasciencecoursera/datasciencecoursera")
+
+fileUrl1<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+download.file(fileUrl1,destfile="pml-training.csv",method = "curl")
+train<-read.csv("pml-training.csv",header= TRUE,na.strings = c("NA", "#DIV/0!"))
+
+
+fileUrl2<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+download.file(fileUrl2,destfile="pml-testing",method = "curl")
+test<-read.csv("pml-testing",header = TRUE, na.strings = c("NA", "#DIV/0!"))
+
+dim(train)
+sum(!complete.cases(train))
+
+#str(train)
+```
+
+From the data above we can see that we have to exclude following columns:
+
+2.1. Columns 1-7 (X-sequence number; user_namem, raw_timestamp_part_1, raw_timestamp_part_2,cvtd_timestamp - reflects just monitoring time; new_window, num_window - type of operating system) - doesn't influence on "Classe";
+
+2.2. Columns with all values ="NA";
+
+2.3. Removing zero covariants.
+
+```{r, echo=TRUE}
+
+train<-train[,-c(1:7)]
+test <-test[,-c(1:7)]
+
+goodTrainColumns <- train[,colSums(is.na(train)) == 0]
+train <-train[,colnames(goodTrainColumns)]
+
+#goodTrainColumns<- goodTrainColumns  %>% select(-c(classe))
+#test <-test[,colnames(goodTrainColumns)]
+
+nzv<-nearZeroVar(train,saveMetrics=TRUE)
+train <- train[, nzv$nzv==FALSE]
+
+#train<-preProcess(train[,-53], method="knnImpute")
+
+sum(complete.cases(train))
+dim(train)
+train$classe <- as.factor(train$classe)
+```
+
+## Data partitioning
+
+Since we have medium sample size - we devided it 60/40.
+
+```{r, echo=TRUE}
+intervalStart <- Sys.time()
+trainSet <- createDataPartition(train$classe, p=0.6, list = FALSE)
+train_train <- train[trainSet,]
+train_test <- train[-trainSet,]
+
+dim(train_train)
+dim(train_test)
+#x <- train_train[,-53]
+#y <- train_train[,53]
+```
+
+## Prediction Model
+
+I decided to stick on particular model (random forest) and tune on it (since 
+it's accuracy  is 99% there is no need to create multiple models).
+
+To improve processing time of the multiple executions of the train() function, I used the parallel processing capabilities of the parallel package.
+
+I used 5- fold cross-validation resampling technique (it's less computationally expensive than default techniques)
+```{r, echo=TRUE}
+cluster <- makeCluster(detectCores() - 1)
+registerDoParallel(cluster)
+fitControl <- trainControl(method = "cv",number = 5,allowParallel = TRUE)
+#system.time(mod1 <- train(x,y, method="rf",data=train_train,trControl = fitControl))
+system.time(mod <- train(classe ~ ., method="rf",data=train_train,trControl = fitControl))
+stopCluster(cluster)
+registerDoSEQ()
+
+pred <- predict(mod, train_test)
+```
+## Results (out of sample error)
+```{r, echo=TRUE}
+confusionMatrix(train_test$classe, pred)
+
+```
+From the result above we can see that out of sample error on satisfied level 
+and we can use this model for prediction on validation sample.
+  
+  Overall accuracy - 99,2%
+  
+  95% confidence interval (98.93%, 99.35%)
+  
+  Sensitivity varies by "classe": (98.19%,99.93%)
+  
+  Specificity varies by "classe": (99.70%,99.89%)
+  
+  Pos Pred Value varies by "classe": (98.60%,99.31%)
+  
+  Neg Pred Value varies by "classe": (99.61%,99.98%)
